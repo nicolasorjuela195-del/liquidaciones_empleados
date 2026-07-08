@@ -77,6 +77,14 @@
     border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fff;
     transition:.15s;
   }
+  .field textarea{
+    width:100%;font:inherit;font-size:14px;color:var(--ink);
+    border:1px solid var(--line);border-radius:9px;padding:9px 11px;background:#fff;
+    transition:.15s;resize:vertical;line-height:1.5;
+  }
+  .field textarea:focus{
+    outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(107,113,120,.13);
+  }
   .field input:focus,.field select:focus{
     outline:none;border-color:var(--accent);box-shadow:0 0 0 3px rgba(184,134,46,.13);
   }
@@ -157,6 +165,15 @@
   .firma-linea{border-top:1px solid var(--ink);margin-bottom:6px}
   .firma-nombre{font-size:11.5px;font-weight:600;color:var(--ink)}
   .firma-doc{font-size:10.5px;color:var(--ink-soft);margin-top:2px}
+  .memo-body{font-size:12.5px;line-height:1.7;position:relative}
+  .memo-body .ref{font-size:11.5px;color:var(--ink-soft);margin-bottom:16px}
+  .memo-body .parrafo{margin-bottom:12px;text-align:justify}
+  .memo-body .memo-asunto{font-weight:600;margin:14px 0}
+  .memo-body .cierre{margin-top:18px}
+  .memo-legal{
+    font-size:10.5px;color:var(--ink-soft);line-height:1.55;margin-top:16px;
+    background:var(--line-soft);border-radius:9px;padding:11px 13px;text-align:justify;
+  }
 
   /* ---------- Admin ---------- */
   .admin-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:6px}
@@ -213,6 +230,7 @@
     </div>
     <nav class="tabs">
       <button id="nav-gen" class="active" onclick="showView('gen')">Generar</button>
+      <button id="nav-memo" onclick="showView('memo')">Memorandos</button>
       <button id="nav-admin" onclick="showView('admin')">Empleados</button>
     </nav>
   </div>
@@ -362,6 +380,91 @@
       <div style="margin-top:18px;display:flex;gap:10px">
         <button class="btn btn-ghost btn-sm" onclick="exportar()">Exportar lista (código)</button>
         <button class="btn btn-ghost btn-sm" onclick="restaurar()">Restaurar lista original</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ VISTA MEMORANDOS ============ -->
+  <div id="view-memo" class="view">
+    <div class="grid">
+      <!-- Columna izquierda: formulario -->
+      <div class="panel">
+        <h2>Datos del memorando</h2>
+
+        <div class="field">
+          <label>Tipo de documento</label>
+          <select id="memo-tipo" onchange="renderMemo()">
+            <option value="llamado">Llamado de atención (leve)</option>
+            <option value="memorando">Memorando por falta (formal)</option>
+            <option value="comunicado">Comunicado general (informativo)</option>
+          </select>
+          <div class="hint" id="memo-tipo-hint"></div>
+        </div>
+
+        <div class="field">
+          <label>Empleador</label>
+          <select id="memo-empleador" onchange="poblarMemoEmpleados()">
+            <option value="thg">THE GARAGE DETAILING &amp; INTERIOR CUSTOM S.A.S</option>
+            <option value="jo">Ryder Javier Orjuela (persona natural)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Destinatario</label>
+          <div class="seg" style="width:100%">
+            <button id="d-uno" class="active" style="flex:1" onclick="setDest('uno')">Un empleado</button>
+            <button id="d-todos" style="flex:1" onclick="setDest('todos')">Todo el equipo</button>
+          </div>
+        </div>
+
+        <div class="field" id="memo-empleado-wrap">
+          <label>Empleado</label>
+          <select id="memo-empleado" onchange="renderMemo()">
+            <option value="">— Selecciona un empleado —</option>
+          </select>
+        </div>
+
+        <!-- Motivo (llamado y memorando) -->
+        <div id="memo-motivo-wrap">
+          <div class="field">
+            <label>Motivo</label>
+            <select id="memo-motivo" onchange="aplicarMotivo()">
+              <option value="">— Selecciona un motivo —</option>
+            </select>
+          </div>
+          <div class="field">
+            <label>Descripción de los hechos</label>
+            <textarea id="memo-hechos" rows="4" oninput="renderMemo()" placeholder="Describe con detalle qué ocurrió, cuándo y dónde."></textarea>
+            <div class="hint">Sé específico: fecha, hora y hecho concreto. Esto es lo que da validez legal al documento.</div>
+          </div>
+        </div>
+
+        <!-- Asunto (comunicado) -->
+        <div id="memo-asunto-wrap" style="display:none">
+          <div class="field">
+            <label>Asunto del comunicado</label>
+            <input id="memo-asunto" oninput="renderMemo()" placeholder="Ej: Recordatorio sobre horarios de ingreso">
+          </div>
+          <div class="field">
+            <label>Contenido del comunicado</label>
+            <textarea id="memo-contenido" rows="5" oninput="renderMemo()" placeholder="Escribe el mensaje que quieres comunicar al equipo."></textarea>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Fecha del documento</label>
+          <input id="memo-fecha" type="date" onchange="renderMemo()">
+        </div>
+
+        <button class="btn btn-primary" onclick="generarMemoPDF()" style="margin-top:8px">
+          Descargar PDF
+        </button>
+      </div>
+
+      <!-- Columna derecha: vista previa -->
+      <div class="panel">
+        <div class="prev-head"><h2>Vista previa</h2></div>
+        <div id="memo-preview"></div>
       </div>
     </div>
   </div>
@@ -991,14 +1094,305 @@ function exportar(){
 }
 
 /* =========================================================
+   MEMORANDOS
+   ========================================================= */
+let memoDest = 'uno';
+
+const MEMO_TIPOS = {
+  llamado:  { titulo:"LLAMADO DE ATENCIÓN", hint:"Primer aviso escrito por una falta leve. Sirve como antecedente si la conducta se repite." },
+  memorando:{ titulo:"MEMORANDO", hint:"Documento formal que deja constancia de una falta y advierte sobre consecuencias." },
+  comunicado:{ titulo:"COMUNICADO", hint:"Mensaje informativo para el equipo. No es una sanción." }
+};
+
+// Motivos comunes con texto base editable
+const MEMO_MOTIVOS = [
+  { id:"tarde", label:"Llegadas tarde / incumplimiento de horario",
+    texto:"se ha evidenciado el incumplimiento reiterado del horario de trabajo establecido, presentándose llegadas tarde sin justificación válida. Se recuerda que el horario de trabajo es de lunes a viernes de 9:00 a.m. a 6:00 p.m. y los sábados de 9:00 a.m. a 1:00 p.m." },
+  { id:"inasistencia", label:"Inasistencia injustificada",
+    texto:"se registró su inasistencia al puesto de trabajo sin haber presentado justificación ni autorización previa por parte del empleador." },
+  { id:"funciones", label:"Incumplimiento de funciones",
+    texto:"se ha observado el incumplimiento de las funciones y responsabilidades propias de su cargo, afectando el normal desarrollo de las labores." },
+  { id:"herramientas", label:"Uso indebido de herramientas / bienes de la empresa",
+    texto:"se identificó el uso indebido de las herramientas y bienes de la empresa, contrariando las instrucciones impartidas para su correcto manejo." },
+  { id:"seguridad", label:"Incumplimiento de normas de seguridad",
+    texto:"se evidenció el incumplimiento de las normas de seguridad en el trabajo, poniendo en riesgo su integridad y la de sus compañeros." },
+  { id:"trato", label:"Trato inadecuado con compañeros o clientes",
+    texto:"se presentó un trato inadecuado hacia compañeros de trabajo o clientes, contrario a las normas de convivencia y respeto de la empresa." },
+  { id:"reglamento", label:"Incumplimiento de instrucciones / políticas de la empresa",
+    texto:"se ha incurrido en el incumplimiento de instrucciones y políticas impartidas por la empresa para el desarrollo de las labores." },
+  { id:"otro", label:"Otro (describir manualmente)", texto:"" }
+];
+
+function initMemo(){
+  // Poblar motivos
+  const selM=document.getElementById('memo-motivo');
+  MEMO_MOTIVOS.forEach(m=>{
+    const o=document.createElement('option'); o.value=m.id; o.textContent=m.label;
+    selM.appendChild(o);
+  });
+  // Fecha de hoy por defecto
+  const hoy=new Date();
+  document.getElementById('memo-fecha').value=
+    `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`;
+  poblarMemoEmpleados();
+}
+
+function poblarMemoEmpleados(){
+  const empId=document.getElementById('memo-empleador').value;
+  const sel=document.getElementById('memo-empleado');
+  sel.innerHTML='<option value="">— Selecciona un empleado —</option>';
+  EMPLEADOS.filter(e=>e.emp===empId).forEach(e=>{
+    const o=document.createElement('option'); o.value=e.id; o.textContent=e.nombre;
+    sel.appendChild(o);
+  });
+  renderMemo();
+}
+
+function setDest(d){
+  memoDest=d;
+  document.getElementById('d-uno').classList.toggle('active',d==='uno');
+  document.getElementById('d-todos').classList.toggle('active',d==='todos');
+  document.getElementById('memo-empleado-wrap').style.display = d==='uno'?'block':'none';
+  renderMemo();
+}
+
+function aplicarMotivo(){
+  const id=document.getElementById('memo-motivo').value;
+  const m=MEMO_MOTIVOS.find(x=>x.id===id);
+  const ta=document.getElementById('memo-hechos');
+  if(m && m.texto){
+    // Prefijo "el día ___" para que el usuario complete
+    ta.value = m.texto;
+  }
+  renderMemo();
+}
+
+function renderMemo(){
+  const tipo=document.getElementById('memo-tipo').value;
+  const empId=document.getElementById('memo-empleador').value;
+  const e=EMPLEADORES[empId];
+  const fecha=document.getElementById('memo-fecha').value;
+  const prev=document.getElementById('memo-preview');
+
+  // Hint del tipo
+  document.getElementById('memo-tipo-hint').textContent=MEMO_TIPOS[tipo].hint;
+
+  // Mostrar/ocultar campos según tipo
+  const esComunicado = tipo==='comunicado';
+  document.getElementById('memo-motivo-wrap').style.display = esComunicado?'none':'block';
+  document.getElementById('memo-asunto-wrap').style.display = esComunicado?'block':'none';
+  // Comunicado siempre es para todos; forzar destinatario
+  if(esComunicado){
+    document.getElementById('memo-empleado-wrap').style.display='none';
+  } else if(memoDest==='uno'){
+    document.getElementById('memo-empleado-wrap').style.display='block';
+  }
+
+  // Marca de agua según empleador
+  document.documentElement.style.setProperty('--wm', `url(${WATERMARKS[empId]})`);
+
+  const paraTodos = esComunicado || memoDest==='todos';
+  let nombre='', cargo='', cedula='';
+  if(!paraTodos){
+    const id=document.getElementById('memo-empleado').value;
+    const emp=EMPLEADOS.find(x=>String(x.id)===String(id));
+    if(!emp){
+      prev.innerHTML=`<div class="empty-prev">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+        <rect x="4" y="3" width="16" height="18" rx="2"/><line x1="8" y1="8" x2="16" y2="8"/>
+        <line x1="8" y1="12" x2="16" y2="12"/></svg>
+        <div>Selecciona un empleado para ver la vista previa</div></div>`;
+      return;
+    }
+    nombre=emp.nombre; cargo=emp.cargo; cedula=emp.cedula;
+  }
+
+  const wmClass = empId==='jo'?' wm-lion':'';
+  let html=`<div class="doc${wmClass}">
+    <div class="docttl">${e.razon}</div>
+    <div class="docsub">${e.nit}</div>
+    <div class="docttl" style="font-size:13px;margin-top:10px">${MEMO_TIPOS[tipo].titulo}</div>
+    <div class="memo-body">
+      <div class="ref">Bogotá D.C., ${fechaTxt(fecha)}</div>`;
+
+  if(esComunicado){
+    const asunto=document.getElementById('memo-asunto').value||"—";
+    const contenido=document.getElementById('memo-contenido').value||"";
+    html+=`<div class="parrafo"><b>Para:</b> Todo el personal de ${e.razon}</div>
+      <div class="memo-asunto">Asunto: ${asunto}</div>
+      <div class="parrafo">${contenido.replace(/\n/g,'<br>')||"<i>Escribe el contenido del comunicado…</i>"}</div>
+      <div class="cierre">Agradecemos su atención y cumplimiento.</div>`;
+  } else {
+    const hechos=document.getElementById('memo-hechos').value||"";
+    const dest = paraTodos ? `todo el personal de ${e.razon}` : `el(la) señor(a) <b>${nombre}</b>, identificado(a) con cédula de ciudadanía No. ${cedula}, quien ocupa el cargo de ${cargo}`;
+    const encabezado = paraTodos
+      ? `Por medio del presente documento, ${e.razon} se dirige a todo el personal para manifestar lo siguiente:`
+      : `Por medio del presente documento, ${e.razon} se dirige a ${dest}, con el fin de dejar constancia de lo siguiente:`;
+    html+=`<div class="parrafo">${encabezado}</div>
+      <div class="parrafo">${hechos ? (paraTodos?"":"Que ")+hechos : "<i>Describe los hechos que motivan el documento…</i>"}</div>`;
+    if(tipo==='llamado'){
+      html+=`<div class="parrafo">En consecuencia, se hace este <b>llamado de atención</b> con el fin de que la conducta descrita sea corregida de manera inmediata.</div>
+        <div class="parrafo">Se advierte que la reincidencia en esta u otras conductas podrá dar lugar a sanciones disciplinarias más severas, conforme a la legislación laboral vigente.</div>`;
+    } else if(tipo==='memorando'){
+      html+=`<div class="parrafo">En consecuencia, se emite el presente <b>memorando</b> como constancia formal de los hechos descritos. Previamente se ha escuchado al trabajador respecto de los mismos, en garantía de su derecho de defensa.</div>
+        <div class="parrafo">Se advierte que la reincidencia podrá dar lugar a las sanciones disciplinarias establecidas en el Código Sustantivo del Trabajo, incluyendo la posible terminación del contrato con justa causa.</div>`;
+    }
+  }
+
+  // Firmas
+  if(paraTodos){
+    html+=`<div class="firmas" style="margin-top:34px">
+      <div class="firma">
+        <div class="firma-linea"></div>
+        <div class="firma-nombre">${e.razon}</div>
+        <div class="firma-doc">${e.nit}</div>
+      </div>
+    </div>`;
+  } else {
+    html+=`<div class="firmas" style="margin-top:34px">
+      <div class="firma">
+        <div class="firma-linea"></div>
+        <div class="firma-nombre">${e.razon}</div>
+        <div class="firma-doc">${e.nit} · Empleador</div>
+      </div>
+      <div class="firma">
+        <div class="firma-linea"></div>
+        <div class="firma-nombre">${nombre}</div>
+        <div class="firma-doc">C.C. ${cedula} · Recibido</div>
+      </div>
+    </div>`;
+    if(tipo!=='comunicado'){
+      html+=`<div class="memo-legal">La firma del trabajador constituye únicamente constancia de recibido y notificación del presente documento, y no implica aceptación de los hechos. En caso de negativa a firmar, se dejará constancia con dos testigos.</div>`;
+    }
+  }
+
+  html+=`</div></div>`;
+  prev.innerHTML=html;
+}
+
+function generarMemoPDF(){
+  const tipo=document.getElementById('memo-tipo').value;
+  const empId=document.getElementById('memo-empleador').value;
+  const e=EMPLEADORES[empId];
+  const fecha=document.getElementById('memo-fecha').value;
+  const esComunicado=tipo==='comunicado';
+  const paraTodos=esComunicado || memoDest==='todos';
+
+  let nombre='',cargo='',cedula='';
+  if(!paraTodos){
+    const id=document.getElementById('memo-empleado').value;
+    if(!id){ toast("Selecciona un empleado primero"); return; }
+    const emp=EMPLEADOS.find(x=>String(x.id)===String(id));
+    nombre=emp.nombre; cargo=emp.cargo; cedula=emp.cedula;
+  }
+
+  const { jsPDF } = window.jspdf;
+  const doc=new jsPDF({unit:'pt',format:'letter'});
+  const M=56; let y=60; const W=612-M*2;
+  const gold=[107,113,120], ink=[26,29,33], soft=[100,105,115];
+
+  // Marca de agua
+  try{
+    let wmW,wmH;
+    if(empId==='jo'){ wmH=400; wmW=wmH*360/416; }
+    else { wmW=420; wmH=wmW*479/1016; }
+    doc.saveGraphicsState && doc.saveGraphicsState();
+    if(doc.GState){ doc.setGState(new doc.GState({opacity:0.12})); }
+    doc.addImage(WATERMARKS[empId],'PNG',(612-wmW)/2,(792-wmH)/2,wmW,wmH);
+    if(doc.GState){ doc.setGState(new doc.GState({opacity:1})); }
+    doc.restoreGraphicsState && doc.restoreGraphicsState();
+  }catch(err){}
+
+  // Encabezado
+  doc.setFont('helvetica','bold').setFontSize(13).setTextColor(...ink);
+  doc.text(e.razon,306,y,{align:'center'}); y+=16;
+  doc.setFont('helvetica','normal').setFontSize(9).setTextColor(...soft);
+  doc.text(e.nit,306,y,{align:'center'}); y+=8;
+  doc.setDrawColor(...gold).setLineWidth(1.2); doc.line(M,y,612-M,y); y+=24;
+  doc.setFont('helvetica','bold').setFontSize(12).setTextColor(...ink);
+  doc.text(MEMO_TIPOS[tipo].titulo,306,y,{align:'center'}); y+=26;
+
+  doc.setFont('helvetica','normal').setFontSize(9.5).setTextColor(...soft);
+  doc.text(`Bogotá D.C., ${fechaTxt(fecha)}`,M,y); y+=22;
+
+  doc.setTextColor(...ink).setFontSize(10);
+  function parrafo(txt,bold){
+    doc.setFont('helvetica',bold?'bold':'normal');
+    const lines=doc.splitTextToSize(txt,W);
+    doc.text(lines,M,y,{align:'justify',maxWidth:W}); y+=lines.length*14+8;
+  }
+
+  if(esComunicado){
+    const asunto=document.getElementById('memo-asunto').value||"—";
+    const contenido=document.getElementById('memo-contenido').value||"";
+    parrafo(`Para: Todo el personal de ${e.razon}`);
+    doc.setFont('helvetica','bold'); doc.text(`Asunto: ${asunto}`,M,y); y+=20;
+    contenido.split('\n').forEach(p=>{ if(p.trim()) parrafo(p); });
+    y+=4; parrafo("Agradecemos su atención y cumplimiento.");
+  } else {
+    const hechos=document.getElementById('memo-hechos').value||"";
+    const dest = paraTodos
+      ? `todo el personal de ${e.razon}`
+      : `el(la) señor(a) ${nombre}, identificado(a) con cédula de ciudadanía No. ${cedula}, quien ocupa el cargo de ${cargo}`;
+    const encabezado = paraTodos
+      ? `Por medio del presente documento, ${e.razon} se dirige a todo el personal para manifestar lo siguiente:`
+      : `Por medio del presente documento, ${e.razon} se dirige a ${dest}, con el fin de dejar constancia de lo siguiente:`;
+    parrafo(encabezado);
+    parrafo((paraTodos?"":"Que ")+hechos);
+    if(tipo==='llamado'){
+      parrafo("En consecuencia, se hace este llamado de atención con el fin de que la conducta descrita sea corregida de manera inmediata.");
+      parrafo("Se advierte que la reincidencia en esta u otras conductas podrá dar lugar a sanciones disciplinarias más severas, conforme a la legislación laboral vigente.");
+    } else if(tipo==='memorando'){
+      parrafo("En consecuencia, se emite el presente memorando como constancia formal de los hechos descritos. Previamente se ha escuchado al trabajador respecto de los mismos, en garantía de su derecho de defensa.");
+      parrafo("Se advierte que la reincidencia podrá dar lugar a las sanciones disciplinarias establecidas en el Código Sustantivo del Trabajo, incluyendo la posible terminación del contrato con justa causa.");
+    }
+  }
+
+  y+=30;
+  // Firmas
+  doc.setDrawColor(...ink).setLineWidth(.6);
+  const colW=220;
+  if(paraTodos){
+    doc.line(M,y,M+colW,y); y+=12;
+    doc.setFont('helvetica','bold').setFontSize(8.5).setTextColor(...ink);
+    let ff=8.5; doc.setFontSize(ff);
+    while(doc.getTextWidth(e.razon)>colW && ff>6){ ff-=0.5; doc.setFontSize(ff); }
+    doc.text(e.razon,M,y); doc.setFontSize(8.5); y+=11;
+    doc.setFont('helvetica','normal').setTextColor(...soft);
+    doc.text(e.nit,M,y);
+  } else {
+    doc.line(M,y,M+colW,y); doc.line(612-M-colW,y,612-M,y); y+=12;
+    doc.setFont('helvetica','bold').setFontSize(8.5).setTextColor(...ink);
+    let ff=8.5; doc.setFontSize(ff);
+    while(doc.getTextWidth(e.razon)>colW && ff>6){ ff-=0.5; doc.setFontSize(ff); }
+    doc.text(e.razon,M,y);
+    doc.setFontSize(8.5);
+    doc.text(nombre,612-M-colW,y); y+=11;
+    doc.setFont('helvetica','normal').setTextColor(...soft);
+    doc.text(e.nit+" · Empleador",M,y);
+    doc.text("C.C. "+cedula+" · Recibido",612-M-colW,y); y+=24;
+    // Nota legal
+    doc.setFontSize(7.5).setTextColor(...soft);
+    const nota="La firma del trabajador constituye únicamente constancia de recibido y notificación, y no implica aceptación de los hechos. En caso de negativa a firmar, se dejará constancia con dos testigos.";
+    const nl=doc.splitTextToSize(nota,W); doc.text(nl,M,y);
+  }
+
+  const tnom = paraTodos ? "Equipo" : nombre.replace(/\s+/g,'_');
+  const fname=`${MEMO_TIPOS[tipo].titulo.replace(/\s+/g,'_')}_${tnom}.pdf`;
+  doc.save(fname);
+  toast("PDF generado");
+}
+
+/* =========================================================
    NAV
    ========================================================= */
 function showView(v){
-  document.getElementById('view-gen').classList.toggle('active',v==='gen');
-  document.getElementById('view-admin').classList.toggle('active',v==='admin');
-  document.getElementById('nav-gen').classList.toggle('active',v==='gen');
-  document.getElementById('nav-admin').classList.toggle('active',v==='admin');
+  ['gen','memo','admin'].forEach(x=>{
+    document.getElementById('view-'+x).classList.toggle('active',v===x);
+    document.getElementById('nav-'+x).classList.toggle('active',v===x);
+  });
   if(v==='admin') renderAdmin();
+  if(v==='memo') renderMemo();
 }
 let _t;
 function toast(msg){
@@ -1015,6 +1409,7 @@ loadEmpleados();
 poblarEmpleados();
 setTipo('liq');
 render();
+initMemo();
 </script>
 </body>
 </html>
