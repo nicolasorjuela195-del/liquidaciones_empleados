@@ -231,6 +231,7 @@
     <nav class="tabs">
       <button id="nav-gen" class="active" onclick="showView('gen')">Generar</button>
       <button id="nav-memo" onclick="showView('memo')">Memorandos</button>
+      <button id="nav-cert" onclick="showView('cert')">Certificados</button>
       <button id="nav-admin" onclick="showView('admin')">Empleados</button>
     </nav>
   </div>
@@ -465,6 +466,92 @@
       <div class="panel">
         <div class="prev-head"><h2>Vista previa</h2></div>
         <div id="memo-preview"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ VISTA CERTIFICADOS ============ -->
+  <div id="view-cert" class="view">
+    <div class="grid">
+      <!-- Columna izquierda: formulario -->
+      <div class="panel">
+        <h2>Datos del certificado</h2>
+
+        <div class="field">
+          <label>Empleador</label>
+          <select id="cert-empleador" onchange="poblarCertEmpleados()">
+            <option value="thg">THE GARAGE DETAILING &amp; INTERIOR CUSTOM S.A.S</option>
+            <option value="jo">Ryder Javier Orjuela (persona natural)</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Empleado</label>
+          <select id="cert-empleado" onchange="cargarCertEmpleado()">
+            <option value="">— Selecciona un empleado —</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Situación del empleado</label>
+          <div class="seg" style="width:100%">
+            <button id="c-activo" class="active" style="flex:1" onclick="setCertEstado('activo')">Activo</button>
+            <button id="c-retirado" style="flex:1" onclick="setCertEstado('retirado')">Retirado</button>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Cargo</label>
+            <input id="cert-cargo" oninput="renderCert()">
+          </div>
+          <div class="field">
+            <label>Salario mensual</label>
+            <input id="cert-salario" inputmode="numeric" oninput="renderCert()">
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Fecha de ingreso</label>
+            <input id="cert-ingreso" type="date" onchange="renderCert()">
+          </div>
+          <div class="field" id="cert-fin-wrap" style="display:none">
+            <label>Fecha de retiro</label>
+            <input id="cert-fin" type="date" onchange="renderCert()">
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Tipo de contrato (opcional)</label>
+          <select id="cert-contrato" onchange="renderCert()">
+            <option value="">— No especificar —</option>
+            <option value="a término indefinido">A término indefinido</option>
+            <option value="a término fijo">A término fijo</option>
+            <option value="por obra o labor">Por obra o labor</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label>Dirigido a (opcional)</label>
+          <input id="cert-dirigido" oninput="renderCert()" placeholder="Ej: A quien interese / Banco XYZ">
+          <div class="hint">Si lo dejas vacío, el certificado dirá "A QUIEN INTERESE".</div>
+        </div>
+
+        <div class="field">
+          <label>Fecha del certificado</label>
+          <input id="cert-fecha" type="date" onchange="renderCert()">
+        </div>
+
+        <button class="btn btn-primary" onclick="generarCertPDF()" style="margin-top:8px">
+          Descargar PDF
+        </button>
+      </div>
+
+      <!-- Columna derecha: vista previa -->
+      <div class="panel">
+        <div class="prev-head"><h2>Vista previa</h2></div>
+        <div id="cert-preview"></div>
       </div>
     </div>
   </div>
@@ -1384,15 +1471,197 @@ function generarMemoPDF(){
 }
 
 /* =========================================================
+   CERTIFICADOS LABORALES
+   ========================================================= */
+let certEstado = 'activo';
+
+function initCert(){
+  const hoy=new Date();
+  document.getElementById('cert-fecha').value=
+    `${hoy.getFullYear()}-${String(hoy.getMonth()+1).padStart(2,'0')}-${String(hoy.getDate()).padStart(2,'0')}`;
+  poblarCertEmpleados();
+}
+
+function poblarCertEmpleados(){
+  const empId=document.getElementById('cert-empleador').value;
+  const sel=document.getElementById('cert-empleado');
+  sel.innerHTML='<option value="">— Selecciona un empleado —</option>';
+  EMPLEADOS.filter(e=>e.emp===empId).forEach(e=>{
+    const o=document.createElement('option'); o.value=e.id; o.textContent=e.nombre;
+    sel.appendChild(o);
+  });
+  document.getElementById('cert-cargo').value='';
+  document.getElementById('cert-salario').value='';
+  document.getElementById('cert-ingreso').value='';
+  renderCert();
+}
+
+function cargarCertEmpleado(){
+  const id=document.getElementById('cert-empleado').value;
+  const e=EMPLEADOS.find(x=>String(x.id)===String(id));
+  if(!e){ renderCert(); return; }
+  document.getElementById('cert-cargo').value=e.cargo;
+  document.getElementById('cert-salario').value=e.salario.toLocaleString('es-CO');
+  document.getElementById('cert-ingreso').value=e.ingreso;
+  renderCert();
+}
+
+function setCertEstado(s){
+  certEstado=s;
+  document.getElementById('c-activo').classList.toggle('active',s==='activo');
+  document.getElementById('c-retirado').classList.toggle('active',s==='retirado');
+  document.getElementById('cert-fin-wrap').style.display = s==='retirado'?'block':'none';
+  renderCert();
+}
+
+function textoCert(){
+  // Construye el cuerpo del certificado y devuelve {dirigido, cuerpo}
+  const empId=document.getElementById('cert-empleador').value;
+  const e=EMPLEADORES[empId];
+  const id=document.getElementById('cert-empleado').value;
+  const emp=EMPLEADOS.find(x=>String(x.id)===String(id));
+  if(!emp) return null;
+  const cargo=document.getElementById('cert-cargo').value||emp.cargo;
+  const salario=parseNum(document.getElementById('cert-salario').value);
+  const ingreso=document.getElementById('cert-ingreso').value;
+  const fin=document.getElementById('cert-fin').value;
+  const contrato=document.getElementById('cert-contrato').value;
+  const dirigido=(document.getElementById('cert-dirigido').value||"A QUIEN INTERESE").toUpperCase();
+
+  const salTxt = `${fmt(salario)} (${numeroALetras(salario)})`;
+  const contratoTxt = contrato ? `, mediante contrato ${contrato}` : "";
+
+  let cuerpo;
+  if(certEstado==='activo'){
+    cuerpo = `Que el(la) señor(a) <b>${emp.nombre}</b>, identificado(a) con cédula de ciudadanía No. ${emp.cedula}, labora en nuestra empresa desde el ${fechaTxt(ingreso)} hasta la fecha, desempeñando el cargo de <b>${cargo}</b>${contratoTxt}, con una asignación salarial mensual de <b>${salTxt}</b>, en jornada de tiempo completo.`;
+  } else {
+    cuerpo = `Que el(la) señor(a) <b>${emp.nombre}</b>, identificado(a) con cédula de ciudadanía No. ${emp.cedula}, laboró en nuestra empresa desde el ${fechaTxt(ingreso)} hasta el ${fechaTxt(fin)}, desempeñando el cargo de <b>${cargo}</b>${contratoTxt}, con una asignación salarial mensual de <b>${salTxt}</b>, en jornada de tiempo completo.`;
+  }
+  return { e, empId, dirigido, cuerpo, nombre:emp.nombre, cedula:emp.cedula };
+}
+
+function renderCert(){
+  const empId=document.getElementById('cert-empleador').value;
+  const fecha=document.getElementById('cert-fecha').value;
+  const prev=document.getElementById('cert-preview');
+
+  document.documentElement.style.setProperty('--wm', `url(${WATERMARKS[empId]})`);
+
+  const data=textoCert();
+  if(!data){
+    prev.innerHTML=`<div class="empty-prev">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+      <rect x="4" y="3" width="16" height="18" rx="2"/><line x1="8" y1="8" x2="16" y2="8"/>
+      <line x1="8" y1="12" x2="16" y2="12"/></svg>
+      <div>Selecciona un empleado para ver la vista previa</div></div>`;
+    return;
+  }
+
+  const wmClass = empId==='jo'?' wm-lion':'';
+  let html=`<div class="doc${wmClass}">
+    <div class="docttl">${data.e.razon}</div>
+    <div class="docsub">${data.e.nit}</div>
+    <div class="docttl" style="font-size:13px;margin-top:14px">CERTIFICADO LABORAL</div>
+    <div class="memo-body">
+      <div class="parrafo" style="margin-top:8px"><b>${data.dirigido}</b></div>
+      <div class="parrafo">${data.e.razon}, identificada con ${data.e.nit.replace('NIT: ','NIT ').replace('C.C.: ','C.C. ')}, se permite certificar:</div>
+      <div class="parrafo">${data.cuerpo}</div>
+      <div class="parrafo">La presente certificación se expide a solicitud del(la) interesado(a), en Bogotá D.C., a los ${fechaLarga(fecha)}.</div>
+      <div class="firmas" style="margin-top:40px">
+        <div class="firma">
+          <div class="firma-linea"></div>
+          <div class="firma-nombre">${data.e.razon}</div>
+          <div class="firma-doc">${data.e.nit}</div>
+        </div>
+      </div>
+    </div>
+  </div>`;
+  prev.innerHTML=html;
+}
+
+function fechaLarga(iso){
+  if(!iso) return "—";
+  const m=["enero","febrero","marzo","abril","mayo","junio","julio","agosto","septiembre","octubre","noviembre","diciembre"];
+  const p=iso.split('-');
+  return `${+p[2]} días del mes de ${m[+p[1]-1]} de ${p[0]}`;
+}
+
+function generarCertPDF(){
+  const data=textoCert();
+  if(!data){ toast("Selecciona un empleado primero"); return; }
+  const fecha=document.getElementById('cert-fecha').value;
+  const empId=data.empId;
+
+  const { jsPDF } = window.jspdf;
+  const doc=new jsPDF({unit:'pt',format:'letter'});
+  const M=64; let y=70; const W=612-M*2;
+  const gold=[107,113,120], ink=[26,29,33], soft=[100,105,115];
+
+  // Marca de agua
+  try{
+    let wmW,wmH;
+    if(empId==='jo'){ wmH=400; wmW=wmH*360/416; }
+    else { wmW=420; wmH=wmW*479/1016; }
+    doc.saveGraphicsState && doc.saveGraphicsState();
+    if(doc.GState){ doc.setGState(new doc.GState({opacity:0.12})); }
+    doc.addImage(WATERMARKS[empId],'PNG',(612-wmW)/2,(792-wmH)/2,wmW,wmH);
+    if(doc.GState){ doc.setGState(new doc.GState({opacity:1})); }
+    doc.restoreGraphicsState && doc.restoreGraphicsState();
+  }catch(err){}
+
+  // Encabezado
+  doc.setFont('helvetica','bold').setFontSize(13).setTextColor(...ink);
+  doc.text(data.e.razon,306,y,{align:'center'}); y+=16;
+  doc.setFont('helvetica','normal').setFontSize(9).setTextColor(...soft);
+  doc.text(data.e.nit,306,y,{align:'center'}); y+=8;
+  doc.setDrawColor(...gold).setLineWidth(1.2); doc.line(M,y,612-M,y); y+=40;
+
+  doc.setFont('helvetica','bold').setFontSize(13).setTextColor(...ink);
+  doc.text("CERTIFICADO LABORAL",306,y,{align:'center'}); y+=40;
+
+  doc.setFont('helvetica','bold').setFontSize(10.5);
+  doc.text(data.dirigido,M,y); y+=26;
+
+  // Texto: reemplazar <b> por render manual sería complejo; usamos texto plano justificado
+  doc.setFont('helvetica','normal').setFontSize(10.5).setTextColor(...ink);
+  function parr(txt){
+    const lines=doc.splitTextToSize(txt,W);
+    doc.text(lines,M,y,{align:'justify',maxWidth:W}); y+=lines.length*15+12;
+  }
+  const nit2=data.e.nit.replace('NIT: ','NIT ').replace('C.C.: ','C.C. ');
+  parr(`${data.e.razon}, identificada con ${nit2}, se permite certificar:`);
+
+  // Cuerpo sin las etiquetas <b>
+  const cuerpoPlano=data.cuerpo.replace(/<\/?b>/g,'');
+  parr(cuerpoPlano);
+  parr(`La presente certificación se expide a solicitud del(la) interesado(a), en Bogotá D.C., a los ${fechaLarga(fecha)}.`);
+
+  y+=50;
+  doc.setDrawColor(...ink).setLineWidth(.6);
+  doc.line(M,y,M+230,y); y+=14;
+  doc.setFont('helvetica','bold').setFontSize(9).setTextColor(...ink);
+  let ff=9; doc.setFontSize(ff);
+  while(doc.getTextWidth(data.e.razon)>230 && ff>6.5){ ff-=0.5; doc.setFontSize(ff); }
+  doc.text(data.e.razon,M,y); doc.setFontSize(9); y+=12;
+  doc.setFont('helvetica','normal').setTextColor(...soft);
+  doc.text(data.e.nit,M,y);
+
+  const fname=`Certificado_Laboral_${data.nombre.replace(/\s+/g,'_')}.pdf`;
+  doc.save(fname);
+  toast("PDF generado");
+}
+
+/* =========================================================
    NAV
    ========================================================= */
 function showView(v){
-  ['gen','memo','admin'].forEach(x=>{
+  ['gen','memo','cert','admin'].forEach(x=>{
     document.getElementById('view-'+x).classList.toggle('active',v===x);
     document.getElementById('nav-'+x).classList.toggle('active',v===x);
   });
   if(v==='admin') renderAdmin();
   if(v==='memo') renderMemo();
+  if(v==='cert') renderCert();
 }
 let _t;
 function toast(msg){
@@ -1410,6 +1679,7 @@ poblarEmpleados();
 setTipo('liq');
 render();
 initMemo();
+initCert();
 </script>
 </body>
 </html>
